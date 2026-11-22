@@ -1,0 +1,39 @@
+name: 인스타 자동 발행
+on:
+  schedule:
+    - cron: "30 3 * * *"   # 12:30 KST 릴스
+    - cron: "0 9 * * *"    # 18:00 KST 뉴스
+    - cron: "0 12 * * *"   # 21:00 KST 큐 1편
+  workflow_dispatch: {}
+permissions:
+  contents: write
+concurrency:
+  group: publish
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: 일시정지 확인
+        id: pause
+        run: if [ -f PAUSE ]; then echo "PAUSE 파일이 있어 쉬어요"; echo "skip=1" >> "$GITHUB_OUTPUT"; fi
+      - name: 일정 갱신 + 발행
+        if: steps.pause.outputs.skip != '1'
+        env:
+          IG_TOKEN: ${{ secrets.IG_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "$IG_TOKEN" ]; then echo "::error::저장소 Secrets 에 IG_TOKEN 이 없어요"; exit 1; fi
+          python3 bot/ig_publish.py plan
+          python3 bot/ig_publish.py run --go
+      - name: 기록 저장
+        if: always() && steps.pause.outputs.skip != '1'
+        run: |
+          git config user.name "duckhoo-bot"
+          git config user.email "duckhoo-bot@users.noreply.github.com"
+          git add bot/schedule.csv bot/log.json 2>/dev/null || true
+          git diff --cached --quiet && exit 0
+          git commit -m "발행 기록 $(TZ=Asia/Seoul date '+%m/%d %H:%M')"
+          for i in 1 2 3; do git pull --rebase -q origin main && git push -q origin main && break; sleep 5; done
