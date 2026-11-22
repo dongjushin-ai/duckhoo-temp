@@ -33,6 +33,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import shutil
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -294,6 +295,8 @@ def open_post(post):
     p = post["path"]
     if p.is_file():  # zip 이면 _cache 에 풀어서 읽기
         dest = CACHE_DIR / post["name"]
+        if dest.exists() and dest.stat().st_mtime < p.stat().st_mtime:  # zip 이 새로 바뀌었으면 다시 풀기
+            shutil.rmtree(dest)
         if not dest.exists():
             with zipfile.ZipFile(p) as z:
                 for info in z.infolist():
