@@ -3,7 +3,7 @@
 GitHub Actions 가 매일 18:00 · 20:00 KST 에 `bot/ig_publish.py` 를 돌려 인스타에 올려요. PC 는 필요 없어요.
 
 **v6 (2026-11-23 컨설팅 리뉴얼): 주 5회, 20:00 KST**
-- 월·목 20:00 정보형 팁 릴스, 상황극 없음 (`posts/reels/팁_NNN_주제.mp4` + 같은 이름 `.txt` 캡션)
+- 월·목 20:00 오리 편집장 릴스 (`posts/reels/시트콤_NNN_주제.mp4` + 같은 이름 `.txt` 캡션)
 - 화·토 20:00 8장 캐러셀 (`posts/queue/비교|레시피|용어_NNN_주제.zip`)
 - 금 20:00 뉴스 릴스 1편 (`posts/news` + 같은 이름 mp4, `NEWS_REEL_DAYS=금`)
 - 번호 NNN 은 `QUEUE_SLOTS=월20:00,화20:00,목20:00,토20:00` 의 몇 번째 칸인지 (QUEUE_START 2026-11-24 부터)
