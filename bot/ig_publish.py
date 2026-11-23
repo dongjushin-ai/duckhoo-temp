@@ -17,6 +17,7 @@
 게시물 이름은 두 가지 다 읽어요.
   · 순서 큐: 툴만화_001_WisprFlow(.zip)  → 날짜 = QUEUE_START + (번호-1)일
   · 예전 방식: 2026-11-24_화_커버스토리_01_2026AI지도(.zip)
+뉴스 릴스: 날짜 붙은 편(posts/news)과 같은 이름의 mp4 가 REELS_DIR 에 있으면 그날 NEWS_REEL_TIME(기본 12:30)에 릴스.
 릴스: 고른 편만 (주 1편 정도). REELS_DIR 에 <게시물이름>.mp4 를 넣은 편만 릴스가 돼요.
       plan 이 그 편 캐러셀 다음 날 REEL_TIME(기본 12:30)에 릴스 줄을 만들어요 (캐러셀도 그대로 올라감).
       REEL_DAYS(예: 수) 를 적으면 다음 날 이후 첫 그 요일로 잡아요. 영상은 Meta 에 직접 올려서 GitHub 불필요.
@@ -507,14 +508,21 @@ def cmd_plan(env, args):
         r["status"] = log.get(name, {}).get("state", "")
         rows.append(r)
         seen.add(key)
-        if find_reel(env, name) and r.get("date"):  # 릴스로 고른 편(mp4 있음)만, 캐러셀 다음 날(또는 그 뒤 첫 REEL_DAYS 요일)
-            nxt = datetime.strptime(r["date"], "%Y-%m-%d").date() + timedelta(days=1)
-            while rdays and nxt.weekday() not in rdays:
-                nxt += timedelta(days=1)
+        if find_reel(env, name) and r.get("date"):
+            if p.get("num"):  # 큐 편: 릴스로 고른 편(mp4 있음)만, 캐러셀 다음 날(또는 그 뒤 첫 REEL_DAYS 요일) REEL_TIME
+                nxt = datetime.strptime(r["date"], "%Y-%m-%d").date() + timedelta(days=1)
+                while rdays and nxt.weekday() not in rdays:
+                    nxt += timedelta(days=1)
+                rtime = rt
+            else:  # 날짜 붙은 편(뉴스): 같은 날 NEWS_REEL_TIME (캐러셀 18:00 보다 먼저)
+                nxt = datetime.strptime(r["date"], "%Y-%m-%d").date()
+                rtime = env.get("NEWS_REEL_TIME", "12:30")
             rkey = ("reel", name)
             if True:
-                rr = old.get(rkey, {"date": nxt.isoformat(), "time": rt, "type": "reel", "folder": name,
+                rr = old.get(rkey, {"date": nxt.isoformat(), "time": rtime, "type": "reel", "folder": name,
                                     "approved": env.get("AUTO_APPROVE", "")})
+                if not log.get(log_key("reel", name)):  # 아직 안 올린 줄은 지금 설정 시각으로 맞춤
+                    rr["time"] = rtime
                 rr["type"] = "reel"
                 rr["status"] = log.get(log_key("reel", name), {}).get("state", "")
                 rows.append(rr)
@@ -531,7 +539,7 @@ def cmd_plan(env, args):
     n_reel = sum(row_type(r) == "reel" for r in rows)
     weeks = {}
     for r in rows:
-        if row_type(r) == "reel" and r.get("date"):
+        if row_type(r) == "reel" and r.get("date") and not NAME_RE.match(r["folder"]):  # 주 1편 목표는 큐 릴스만 (뉴스 릴스는 매일)
             wk = datetime.strptime(r["date"], "%Y-%m-%d").date().isocalendar()[:2]
             weeks.setdefault(wk, []).append(r["folder"])
     for wk, names in sorted(weeks.items()):
