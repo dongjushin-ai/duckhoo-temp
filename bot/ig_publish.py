@@ -17,7 +17,7 @@
 게시물 이름은 두 가지 다 읽어요.
   · 순서 큐: 툴만화_001_WisprFlow(.zip)  → 날짜 = QUEUE_START + (번호-1)일
   · 예전 방식: 2026-11-24_화_커버스토리_01_2026AI지도(.zip)
-뉴스 릴스: 날짜 붙은 편(posts/news)과 같은 이름의 mp4 가 REELS_DIR 에 있으면 그날 NEWS_REEL_TIME(기본 12:30)에 릴스.
+뉴스 릴스: 날짜 붙은 편(posts/news)과 같은 이름의 mp4 가 REELS_DIR 에 있으면 그날 NEWS_REEL_TIME(기본 20:00)에 릴스. NEWS_REEL_DAYS(예: 금)면 그 요일만.
 릴스: 고른 편만 (주 1편 정도). REELS_DIR 에 <게시물이름>.mp4 를 넣은 편만 릴스가 돼요.
       plan 이 그 편 캐러셀 다음 날 REEL_TIME(기본 12:30)에 릴스 줄을 만들어요 (캐러셀도 그대로 올라감).
       REEL_DAYS(예: 수) 를 적으면 다음 날 이후 첫 그 요일로 잡아요. 영상은 Meta 에 직접 올려서 GitHub 불필요.
@@ -514,9 +514,12 @@ def cmd_plan(env, args):
                 while rdays and nxt.weekday() not in rdays:
                     nxt += timedelta(days=1)
                 rtime = rt
-            else:  # 날짜 붙은 편(뉴스): 같은 날 NEWS_REEL_TIME (캐러셀 18:00 보다 먼저)
+            else:  # 날짜 붙은 편(뉴스): 같은 날 NEWS_REEL_TIME. NEWS_REEL_DAYS(예: 금)를 적으면 그 요일 뉴스만 릴스
                 nxt = datetime.strptime(r["date"], "%Y-%m-%d").date()
-                rtime = env.get("NEWS_REEL_TIME", "12:30")
+                rtime = env.get("NEWS_REEL_TIME", "20:00")
+                ndays = {WEEKDAYS[c] for c in env.get("NEWS_REEL_DAYS", "") if c in WEEKDAYS}
+                if ndays and nxt.weekday() not in ndays:
+                    continue
             rkey = ("reel", name)
             if True:
                 rr = old.get(rkey, {"date": nxt.isoformat(), "time": rtime, "type": "reel", "folder": name,
@@ -529,9 +532,8 @@ def cmd_plan(env, args):
                 seen.add(rkey)
     for key, r in old.items():
         if key not in seen:
-            if key[0] == "reel" and r.get("approved", "").strip().upper() != "Y" \
-                    and log_key("reel", key[1]) not in log:
-                continue  # 릴스 후보에서 빠진 편(mp4 없앰)은 줄도 지움
+            if key[0] == "reel" and log_key("reel", key[1]) not in log:
+                continue  # 릴스 후보에서 빠진 편(mp4 없앰, NEWS_REEL_DAYS 밖)은 안 올렸으면 줄도 지움
             r["status"] = "영상 없음" if key[0] == "reel" else "폴더 없음"
             rows.append(r)
     rows.sort(key=lambda r: (r.get("date") or "9999", r.get("time", ""), r["folder"]))
