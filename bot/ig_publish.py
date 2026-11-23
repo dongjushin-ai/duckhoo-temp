@@ -15,8 +15,12 @@
   python ig_publish.py refresh                장기 토큰 연장 (run 이 자동으로도 함)
 
 게시물 이름은 두 가지 다 읽어요.
-  · 순서 큐: 툴만화_001_WisprFlow(.zip)  → 날짜 = QUEUE_START + (번호-1)일
+  · 순서 큐: 비교_001_AI3대장(.zip)  → QUEUE_SLOTS(예: 월20:00,화20:00,목20:00,토20:00)의 번호째 칸.
+    QUEUE_SLOTS 가 없으면 날짜 = QUEUE_START + (번호-1)일, POST_TIME.
+    릴스만 있는 큐 편: REELS_DIR 의 시트콤_002_주제.mp4 (+ 같은 이름 .txt 캡션) → 그 번호 칸에 릴스로.
   · 예전 방식: 2026-11-24_화_커버스토리_01_2026AI지도(.zip)
+뉴스 릴스: 날짜 붙은 편(posts/news)과 같은 이름의 mp4 가 REELS_DIR 에 있으면 그날 NEWS_REEL_TIME(기본 20:00)에 릴스. NEWS_REEL_DAYS(예: 금)면 그 요일만.
+          캐러셀 없이 릴스만: posts/reels/YYYY-MM-DD_요일_AI뉴스_주제.mp4 + 같은 이름 .txt(캡션) 만 넣으면 됨.
 릴스: 고른 편만 (주 1편 정도). REELS_DIR 에 <게시물이름>.mp4 를 넣은 편만 릴스가 돼요.
       plan 이 그 편 캐러셀 다음 날 REEL_TIME(기본 12:30)에 릴스 줄을 만들어요 (캐러셀도 그대로 올라감).
       REEL_DAYS(예: 수) 를 적으면 다음 날 이후 첫 그 요일로 잡아요. 영상은 Meta 에 직접 올려서 GitHub 불필요.
@@ -240,23 +244,54 @@ def find_posts(env):
         except ValueError:
             raise Fail(f"QUEUE_START 형식은 2026-11-21 처럼: {env['QUEUE_START']}")
     posts = {}
+    slots = queue_slots(env, start)
     for p in sorted(root.rglob("*")):
+        if p.is_file() and p.suffix.lower() == ".mp4" and "_cache" not in p.parts:  # 릴스만 있는 큐 편 (v6 시트콤 등)
+            q = QUEUE_RE.match(p.stem)
+            if q:
+                num = int(q.group(2))
+                d_, t_ = slots(num) if start else ("", "")
+                posts[p.stem] = {"name": p.stem, "date": d_, "time": t_, "num": num, "path": p, "kind": "reel"}
+            continue
         if "_cache" in p.parts or not (p.is_dir() or (p.is_file() and p.suffix.lower() == ".zip")):
             continue
         name = p.name[:-4] if p.name.lower().endswith(".zip") else p.name
         m, q = NAME_RE.match(p.name), QUEUE_RE.match(p.name)
         if m:
-            date, num = m.group(1), None
+            date, num, qtime = m.group(1), None, ""
         elif q:
             num = int(q.group(2))
-            date = (start + timedelta(days=num - 1)).isoformat() if start else ""
+            date, qtime = slots(num) if start else ("", "")
         else:
             continue
         if p.is_dir() and q and p.parent.name == name:  # zip 을 풀면 생기는 같은 이름 하위 폴더는 건너뜀
             continue
         if p.is_dir() or name not in posts:  # 폴더가 있으면 zip 보다 우선
-            posts[name] = {"name": name, "date": date, "num": num, "path": p}
+            posts[name] = {"name": name, "date": date, "time": qtime, "num": num, "path": p}
     return posts
+
+
+def queue_slots(env, start):
+    """번호 → (날짜, 시각). QUEUE_SLOTS(예: 월20:00,화20:00,목20:00,토20:00)가 있으면 QUEUE_START 부터 그 칸을 차례로,
+    없으면 예전처럼 하루 1편(POST_TIME)."""
+    spec = [x.strip() for x in env.get("QUEUE_SLOTS", "").split(",") if x.strip()]
+    t0 = env.get("POST_TIME", "21:00")
+    if not spec or not start:
+        return lambda n: ((start + timedelta(days=n - 1)).isoformat() if start else "", t0)
+    want = {}
+    for x in spec:
+        if x[0] not in WEEKDAYS:
+            raise Fail(f"QUEUE_SLOTS 형식은 월20:00,목20:00 처럼: {x}")
+        want[WEEKDAYS[x[0]]] = x[1:].strip() or t0
+    def at(n):
+        d, k = start, 0
+        while True:
+            if d.weekday() in want:
+                k += 1
+                if k == n:
+                    return d.isoformat(), want[d.weekday()]
+            d += timedelta(days=1)
+    return at
 
 
 def reels_dir(env):
@@ -267,6 +302,10 @@ def reels_dir(env):
 def find_reel(env, name):
     f = reels_dir(env) / f"{name}.mp4"
     return f if f.is_file() else None
+
+
+def reel_only(p):
+    return p and p.get("kind") == "reel"
 
 
 def reel_caption(env, name, post):
@@ -496,34 +535,78 @@ def cmd_plan(env, args):
     rdays = {WEEKDAYS[c] for c in env.get("REEL_DAYS", "") if c in WEEKDAYS}
     rows, seen, undated = [], set(), 0
     for name, p in sorted(posts.items()):
+        if reel_only(p):  # 릴스만 있는 큐 편: 자기 칸(QUEUE_SLOTS)에 릴스 한 줄
+            rkey = ("reel", name)
+            rr = old.get(rkey, {"date": p["date"], "time": p["time"], "type": "reel", "folder": name,
+                                "approved": env.get("AUTO_APPROVE", "")})
+            if not log.get(log_key("reel", name)):
+                rr["date"], rr["time"] = p["date"], p["time"]
+            rr["type"] = "reel"
+            rr["status"] = log.get(log_key("reel", name), {}).get("state", "")
+            undated += not rr.get("date")
+            rows.append(rr)
+            seen.add(rkey)
+            continue
         key = ("carousel", name)
-        tt = t if p.get("num") else env.get("NEWS_TIME", "18:00")  # 날짜 붙은 편(뉴스 등)은 18:00
+        tt = (p.get("time") or t) if p.get("num") else env.get("NEWS_TIME", "18:00")  # 날짜 붙은 편(뉴스 등)은 18:00
         r = old.get(key, {"date": p["date"], "time": tt, "type": "carousel", "folder": name,
                           "approved": env.get("AUTO_APPROVE", "")})
         if not r.get("date") and p["date"]:
             r["date"] = p["date"]
+        if p.get("num") and not log.get(name):  # 아직 안 올린 큐 편은 지금 칸 설정을 따름
+            r["date"], r["time"] = p["date"] or r.get("date", ""), tt
         undated += not r.get("date")
         r["type"] = "carousel"
         r["status"] = log.get(name, {}).get("state", "")
         rows.append(r)
         seen.add(key)
-        if find_reel(env, name) and r.get("date"):  # 릴스로 고른 편(mp4 있음)만, 캐러셀 다음 날(또는 그 뒤 첫 REEL_DAYS 요일)
-            nxt = datetime.strptime(r["date"], "%Y-%m-%d").date() + timedelta(days=1)
-            while rdays and nxt.weekday() not in rdays:
-                nxt += timedelta(days=1)
+        if find_reel(env, name) and r.get("date"):
+            if p.get("num"):  # 큐 편: 릴스로 고른 편(mp4 있음)만, 캐러셀 다음 날(또는 그 뒤 첫 REEL_DAYS 요일) REEL_TIME
+                nxt = datetime.strptime(r["date"], "%Y-%m-%d").date() + timedelta(days=1)
+                while rdays and nxt.weekday() not in rdays:
+                    nxt += timedelta(days=1)
+                rtime = rt
+            else:  # 날짜 붙은 편(뉴스): 같은 날 NEWS_REEL_TIME. NEWS_REEL_DAYS(예: 금)를 적으면 그 요일 뉴스만 릴스
+                nxt = datetime.strptime(r["date"], "%Y-%m-%d").date()
+                rtime = env.get("NEWS_REEL_TIME", "20:00")
+                ndays = {WEEKDAYS[c] for c in env.get("NEWS_REEL_DAYS", "") if c in WEEKDAYS}
+                if ndays and nxt.weekday() not in ndays:
+                    continue
             rkey = ("reel", name)
             if True:
-                rr = old.get(rkey, {"date": nxt.isoformat(), "time": rt, "type": "reel", "folder": name,
+                rr = old.get(rkey, {"date": nxt.isoformat(), "time": rtime, "type": "reel", "folder": name,
                                     "approved": env.get("AUTO_APPROVE", "")})
+                if not log.get(log_key("reel", name)):  # 아직 안 올린 줄은 지금 설정 시각으로 맞춤
+                    rr["time"] = rtime
                 rr["type"] = "reel"
                 rr["status"] = log.get(log_key("reel", name), {}).get("state", "")
                 rows.append(rr)
                 seen.add(rkey)
+    # 릴스만 있는 뉴스(캐러셀 zip 없이 posts/reels/YYYY-MM-DD_요일_AI뉴스_주제.mp4 + 같은 이름 .txt 캡션)
+    ndays = {WEEKDAYS[c] for c in env.get("NEWS_REEL_DAYS", "") if c in WEEKDAYS}
+    rd = reels_dir(env)
+    for f in sorted(rd.glob("*.mp4")) if rd.is_dir() else []:
+        name, m = f.stem, NAME_RE.match(f.stem)
+        if not m or name in posts:
+            continue
+        d = datetime.strptime(m.group(1), "%Y-%m-%d").date()
+        if ndays and d.weekday() not in ndays:
+            continue
+        rkey = ("reel", name)
+        rr = old.get(rkey, {"date": d.isoformat(), "time": env.get("NEWS_REEL_TIME", "20:00"), "type": "reel",
+                            "folder": name, "approved": env.get("AUTO_APPROVE", "")})
+        if not log.get(log_key("reel", name)):
+            rr["time"] = env.get("NEWS_REEL_TIME", "20:00")
+        rr["type"] = "reel"
+        rr["status"] = log.get(log_key("reel", name), {}).get("state", "")
+        rows.append(rr)
+        seen.add(rkey)
     for key, r in old.items():
         if key not in seen:
-            if key[0] == "reel" and r.get("approved", "").strip().upper() != "Y" \
-                    and log_key("reel", key[1]) not in log:
-                continue  # 릴스 후보에서 빠진 편(mp4 없앰)은 줄도 지움
+            if key[0] == "reel" and log_key("reel", key[1]) not in log:
+                continue  # 릴스 후보에서 빠진 편(mp4 없앰, NEWS_REEL_DAYS 밖)은 안 올렸으면 줄도 지움
+            if key[0] == "carousel" and key[1] not in log:
+                continue  # 큐에서 빠진 편(보관함으로 옮김)은 안 올렸으면 줄도 지움
             r["status"] = "영상 없음" if key[0] == "reel" else "폴더 없음"
             rows.append(r)
     rows.sort(key=lambda r: (r.get("date") or "9999", r.get("time", ""), r["folder"]))
@@ -531,7 +614,7 @@ def cmd_plan(env, args):
     n_reel = sum(row_type(r) == "reel" for r in rows)
     weeks = {}
     for r in rows:
-        if row_type(r) == "reel" and r.get("date"):
+        if row_type(r) == "reel" and r.get("date") and not NAME_RE.match(r["folder"]) and not reel_only(posts.get(r["folder"])):  # 주 1편 목표는 큐 릴스만 (뉴스 릴스는 매일)
             wk = datetime.strptime(r["date"], "%Y-%m-%d").date().isocalendar()[:2]
             weeks.setdefault(wk, []).append(r["folder"])
     for wk, names in sorted(weeks.items()):
