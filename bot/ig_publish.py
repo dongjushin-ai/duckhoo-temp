@@ -20,6 +20,7 @@
     릴스만 있는 큐 편: REELS_DIR 의 시트콤_002_주제.mp4 (+ 같은 이름 .txt 캡션) → 그 번호 칸에 릴스로.
   · 예전 방식: 2026-11-24_화_커버스토리_01_2026AI지도(.zip)
 뉴스 릴스: 날짜 붙은 편(posts/news)과 같은 이름의 mp4 가 REELS_DIR 에 있으면 그날 NEWS_REEL_TIME(기본 20:00)에 릴스. NEWS_REEL_DAYS(예: 금)면 그 요일만.
+          캐러셀 없이 릴스만: posts/reels/YYYY-MM-DD_요일_AI뉴스_주제.mp4 + 같은 이름 .txt(캡션) 만 넣으면 됨.
 릴스: 고른 편만 (주 1편 정도). REELS_DIR 에 <게시물이름>.mp4 를 넣은 편만 릴스가 돼요.
       plan 이 그 편 캐러셀 다음 날 REEL_TIME(기본 12:30)에 릴스 줄을 만들어요 (캐러셀도 그대로 올라감).
       REEL_DAYS(예: 수) 를 적으면 다음 날 이후 첫 그 요일로 잡아요. 영상은 Meta 에 직접 올려서 GitHub 불필요.
@@ -581,6 +582,25 @@ def cmd_plan(env, args):
                 rr["status"] = log.get(log_key("reel", name), {}).get("state", "")
                 rows.append(rr)
                 seen.add(rkey)
+    # 릴스만 있는 뉴스(캐러셀 zip 없이 posts/reels/YYYY-MM-DD_요일_AI뉴스_주제.mp4 + 같은 이름 .txt 캡션)
+    ndays = {WEEKDAYS[c] for c in env.get("NEWS_REEL_DAYS", "") if c in WEEKDAYS}
+    rd = reels_dir(env)
+    for f in sorted(rd.glob("*.mp4")) if rd.is_dir() else []:
+        name, m = f.stem, NAME_RE.match(f.stem)
+        if not m or name in posts:
+            continue
+        d = datetime.strptime(m.group(1), "%Y-%m-%d").date()
+        if ndays and d.weekday() not in ndays:
+            continue
+        rkey = ("reel", name)
+        rr = old.get(rkey, {"date": d.isoformat(), "time": env.get("NEWS_REEL_TIME", "20:00"), "type": "reel",
+                            "folder": name, "approved": env.get("AUTO_APPROVE", "")})
+        if not log.get(log_key("reel", name)):
+            rr["time"] = env.get("NEWS_REEL_TIME", "20:00")
+        rr["type"] = "reel"
+        rr["status"] = log.get(log_key("reel", name), {}).get("state", "")
+        rows.append(rr)
+        seen.add(rkey)
     for key, r in old.items():
         if key not in seen:
             if key[0] == "reel" and log_key("reel", key[1]) not in log:
