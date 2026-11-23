@@ -17,7 +17,7 @@
 게시물 이름은 두 가지 다 읽어요.
   · 순서 큐: 비교_001_AI3대장(.zip)  → QUEUE_SLOTS(예: 월20:00,화20:00,목20:00,토20:00)의 번호째 칸.
     QUEUE_SLOTS 가 없으면 날짜 = QUEUE_START + (번호-1)일, POST_TIME.
-    릴스만 있는 큐 편: REELS_DIR 의 시트콤_002_주제.mp4 (+ 같은 이름 .txt 캡션) → 그 번호 칸에 릴스로.
+    릴스만 있는 큐 편: REELS_DIR 의 팁_002_주제.mp4 (+ 같은 이름 .txt 캡션) → 그 번호 칸에 릴스로.
   · 예전 방식: 2026-11-24_화_커버스토리_01_2026AI지도(.zip)
 뉴스 릴스: 날짜 붙은 편(posts/news)과 같은 이름의 mp4 가 REELS_DIR 에 있으면 그날 NEWS_REEL_TIME(기본 20:00)에 릴스. NEWS_REEL_DAYS(예: 금)면 그 요일만.
           캐러셀 없이 릴스만: posts/reels/YYYY-MM-DD_요일_AI뉴스_주제.mp4 + 같은 이름 .txt(캡션) 만 넣으면 됨.
@@ -246,7 +246,7 @@ def find_posts(env):
     posts = {}
     slots = queue_slots(env, start)
     for p in sorted(root.rglob("*")):
-        if p.is_file() and p.suffix.lower() == ".mp4" and "_cache" not in p.parts:  # 릴스만 있는 큐 편 (v6 시트콤 등)
+        if p.is_file() and p.suffix.lower() == ".mp4" and "_cache" not in p.parts:  # 릴스만 있는 큐 편 (v7 팁 릴스 등)
             q = QUEUE_RE.match(p.stem)
             if q:
                 num = int(q.group(2))
