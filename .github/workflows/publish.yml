@@ -1,8 +1,9 @@
 name: 인스타 자동 발행
 on:
   schedule:
-    - cron: "0 11 * * *"   # 20:00 KST 큐(월·목 릴스, 화·토 캐러셀) + 금 뉴스 릴스
-    - cron: "0 9 * * *"    # 18:00 KST 뉴스
+    - cron: "0 11 * * *"   # 20:00 KST 저녁 (금은 뉴스 릴스)
+    - cron: "0 23 * * *"   # 08:00 KST 아침
+    - cron: "0 3 * * *"    # 12:00 KST 점심
   workflow_dispatch:
     inputs:
       post:

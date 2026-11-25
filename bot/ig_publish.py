@@ -268,6 +268,23 @@ def find_posts(env):
             continue
         if p.is_dir() or name not in posts:  # 폴더가 있으면 zip 보다 우선
             posts[name] = {"name": name, "date": date, "time": qtime, "num": num, "path": p}
+    if start and env.get("QUEUE_RANK", "").strip() in ("1", "Y", "y"):
+        # 번호 대신 순서로 칸 배정: 아직 안 올린 큐 편을 번호 순으로 QUEUE_START 부터 빈칸 없이 채움.
+        # REELS_PAUSED=1 이면 릴스만 있는 편은 일정에서 뺌 (릴스 게시 문제 해결 전까지).
+        log = load_log()
+        def done(p):
+            k = log_key("reel", p["name"]) if p.get("kind") == "reel" else p["name"]
+            return log.get(k, {}).get("state") == "published"
+        paused = env.get("REELS_PAUSED", "").strip() in ("1", "Y", "y")
+        k = 0
+        for p in sorted((p for p in posts.values() if p.get("num")), key=lambda p: (p["num"], p["name"])):
+            if done(p):
+                continue
+            if paused and p.get("kind") == "reel":
+                p["date"], p["time"] = "", ""
+                continue
+            k += 1
+            p["date"], p["time"] = slots(k)
     return posts
 
 
@@ -279,17 +296,19 @@ def queue_slots(env, start):
     if not spec or not start:
         return lambda n: ((start + timedelta(days=n - 1)).isoformat() if start else "", t0)
     want = {}
-    for x in spec:
+    for x in spec:  # 같은 요일을 여러 번 적으면 하루 여러 칸 (예: 월08:00,월12:00,월20:00)
         if x[0] not in WEEKDAYS:
             raise Fail(f"QUEUE_SLOTS 형식은 월20:00,목20:00 처럼: {x}")
-        want[WEEKDAYS[x[0]]] = x[1:].strip() or t0
+        want.setdefault(WEEKDAYS[x[0]], []).append(x[1:].strip() or t0)
+    for v in want.values():
+        v.sort()
     def at(n):
         d, k = start, 0
         while True:
-            if d.weekday() in want:
+            for tm in want.get(d.weekday(), []):
                 k += 1
                 if k == n:
-                    return d.isoformat(), want[d.weekday()]
+                    return d.isoformat(), tm
             d += timedelta(days=1)
     return at
 
