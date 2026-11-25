@@ -3,7 +3,12 @@ on:
   schedule:
     - cron: "0 11 * * *"   # 20:00 KST 큐(월·목 릴스, 화·토 캐러셀) + 금 뉴스 릴스
     - cron: "0 9 * * *"    # 18:00 KST 뉴스
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      post:
+        description: "지금 바로 올릴 편 이름 (비우면 평소대로 일정만)"
+        required: false
+        default: ""
 permissions:
   contents: write
 concurrency:
@@ -23,10 +28,17 @@ jobs:
         env:
           IG_TOKEN: ${{ secrets.IG_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          POST_NOW: ${{ github.event.inputs.post }}
         run: |
           if [ -z "$IG_TOKEN" ]; then echo "::error::저장소 Secrets 에 IG_TOKEN 이 없어요"; exit 1; fi
           python3 bot/ig_publish.py plan
-          python3 bot/ig_publish.py run --go
+          if [ -n "$POST_NOW" ]; then
+            if [ -f "posts/reels/$POST_NOW.mp4" ]; then python3 bot/ig_publish.py reel "$POST_NOW" --go
+            else python3 bot/ig_publish.py publish "$POST_NOW" --go; fi
+            python3 bot/ig_publish.py plan
+          else
+            python3 bot/ig_publish.py run --go
+          fi
       - name: 기록 저장
         if: always() && steps.pause.outputs.skip != '1'
         run: |
