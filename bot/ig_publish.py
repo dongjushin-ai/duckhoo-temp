@@ -796,8 +796,11 @@ def publish_reel(env, post, go, name=None):
     repo = env.get("GITHUB_REPO", "dongjushin-ai/duckhoo-temp").strip().strip("/")
     res, errors = None, []
     for mode in modes:
-        params = {"media_type": "REELS", "caption": caption,
-                  "share_to_feed": env.get("REEL_SHARE_TO_FEED", "true")}
+        mode, _, var = mode.partition(":")
+        params = {"media_type": "REELS", "caption": caption}
+        if var != "nofeed":
+            params["share_to_feed"] = env.get("REEL_SHARE_TO_FEED", "true")
+        ig.ver = var if var.startswith("v") else env.get("API_VERSION", "v25.0")
         if env.get("REEL_THUMB_MS"):
             params["thumb_offset"] = env["REEL_THUMB_MS"]
         try:
@@ -819,7 +822,7 @@ def publish_reel(env, post, go, name=None):
                                   "Content-Type": "application/octet-stream"})
                 if isinstance(r, dict) and r.get("success") is False:
                     raise Fail(f"영상 업로드 실패: {str(r)[:300]}")
-            print(f"  · [{mode}] 컨테이너 {cid} 처리 기다리는 중")
+            print(f"  · [{mode}:{var}] 컨테이너 {cid} 처리 기다리는 중")
             try:
                 wait_container(ig, cid, tries=60, every=10, what="릴스 컨테이너")  # 최대 약 10분
             finally:
