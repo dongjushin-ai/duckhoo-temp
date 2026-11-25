@@ -785,28 +785,69 @@ def publish_reel(env, post, go, name=None):
         print(f"  [건너뜀] 이미 인스타에 같은 릴스가 있어요: {live}")
         return False
     ig = IG(env)
-    params = {"media_type": "REELS", "upload_type": "resumable", "caption": caption,
-              "share_to_feed": env.get("REEL_SHARE_TO_FEED", "true")}
-    if env.get("REEL_THUMB_MS"):
-        params["thumb_offset"] = env["REEL_THUMB_MS"]
-    c = ig.post(f"{ig.uid}/media", **params)
-    cid = c["id"]
-    up = c.get("uri") or f"{env.get('RUPLOAD_BASE', 'https://rupload.facebook.com').rstrip('/')}/ig-api-upload/{ig.ver}/{cid}"
-    res = http("POST", up, body=path.read_bytes(), token=ig.token,
-               headers={"Authorization": f"OAuth {ig.token}", "offset": "0", "file_size": str(size),
-                        "Content-Type": "application/octet-stream"})
-    if isinstance(res, dict) and res.get("success") is False:
-        raise Fail(f"영상 업로드 실패: {str(res)[:300]}")
-    print(f"  · 영상 업로드 완료, 컨테이너 {cid} 처리 기다리는 중")
-    wait_container(ig, cid, tries=60, every=10, what="릴스 컨테이너")  # 최대 약 10분
-    log[key] = {"state": "publishing", "container": cid, "at": now_kst().isoformat(timespec="seconds")}
-    save_log(log)
     try:
-        res = ig.post(f"{ig.uid}/media_publish", creation_id=cid)
+        lim = ig.get(f"{ig.uid}/content_publishing_limit", fields="config,quota_usage")
+        print(f"  · 게시 한도: {lim.get('data', lim)}")
     except Fail as e:
-        log[key] = {"state": "error", "error": str(e)[:300], "at": now_kst().isoformat(timespec="seconds")}
+        print(f"  (게시 한도 확인 실패: {e})")
+    modes = [m.strip() for m in env.get("REEL_MODES", "jsdelivr,raw,resumable").split(",") if m.strip()]
+    rel = path.resolve().relative_to(HERE.parent).as_posix() if str(path.resolve()).startswith(str(HERE.parent)) else None
+    ref = os.environ.get("GITHUB_SHA") or env.get("GITHUB_BRANCH", "main")
+    repo = env.get("GITHUB_REPO", "dongjushin-ai/duckhoo-temp").strip().strip("/")
+    res, errors = None, []
+    for mode in modes:
+        params = {"media_type": "REELS", "caption": caption,
+                  "share_to_feed": env.get("REEL_SHARE_TO_FEED", "true")}
+        if env.get("REEL_THUMB_MS"):
+            params["thumb_offset"] = env["REEL_THUMB_MS"]
+        try:
+            if mode in ("jsdelivr", "raw"):
+                if not rel:
+                    continue
+                q = urllib.parse.quote(rel)
+                params["video_url"] = (f"https://cdn.jsdelivr.net/gh/{repo}@{ref}/{q}" if mode == "jsdelivr"
+                                       else f"https://raw.githubusercontent.com/{repo}/{ref}/{q}")
+                c = ig.post(f"{ig.uid}/media", **params)
+                cid = c["id"]
+            else:
+                params["upload_type"] = "resumable"
+                c = ig.post(f"{ig.uid}/media", **params)
+                cid = c["id"]
+                up = c.get("uri") or f"{env.get('RUPLOAD_BASE', 'https://rupload.facebook.com').rstrip('/')}/ig-api-upload/{ig.ver}/{cid}"
+                r = http("POST", up, body=path.read_bytes(), token=ig.token,
+                         headers={"Authorization": f"OAuth {ig.token}", "offset": "0", "file_size": str(size),
+                                  "Content-Type": "application/octet-stream"})
+                if isinstance(r, dict) and r.get("success") is False:
+                    raise Fail(f"영상 업로드 실패: {str(r)[:300]}")
+            print(f"  · [{mode}] 컨테이너 {cid} 처리 기다리는 중")
+            try:
+                wait_container(ig, cid, tries=60, every=10, what="릴스 컨테이너")  # 최대 약 10분
+            finally:
+                try:
+                    print(f"  · [{mode}] 컨테이너 상태: {ig.get(cid, fields='status,status_code')}")
+                except Fail:
+                    pass
+            log[key] = {"state": "publishing", "container": cid, "mode": mode,
+                        "at": now_kst().isoformat(timespec="seconds")}
+            save_log(log)
+            res = ig.post(f"{ig.uid}/media_publish", creation_id=cid)
+            print(f"  · [{mode}] 게시 성공")
+            break
+        except Fail as e:
+            errors.append(f"[{mode}] {str(e)[:400]}")
+            print(f"  ✗ [{mode}] {str(e)[:400]}")
+            time.sleep(20)
+            live = already_live(env, caption, reel=True)
+            if live:  # 오류로 답했지만 실제로는 올라간 경우
+                log[key] = {"state": "published", "permalink": live, "note": f"{mode} 오류 응답 후 확인됨",
+                            "at": now_kst().isoformat(timespec="seconds")}
+                save_log(log)
+                print(f"  ✓ 실제로는 게시됨: {live}")
+                return True
+    if res is None:
+        log[key] = {"state": "error", "error": " | ".join(errors)[:900], "at": now_kst().isoformat(timespec="seconds")}
         save_log(log)
-        raise
+        raise Fail("릴스 게시 실패 (모든 방식): " + " | ".join(errors)[:900])
     mid = res["id"]
     log[key] = {"state": "published", "media_id": mid, "at": now_kst().isoformat(timespec="seconds")}
     save_log(log)
