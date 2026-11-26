@@ -276,15 +276,31 @@ def find_posts(env):
             k = log_key("reel", p["name"]) if p.get("kind") == "reel" else p["name"]
             return log.get(k, {}).get("state") == "published"
         paused = env.get("REELS_PAUSED", "").strip() in ("1", "Y", "y")
+        # 이미 지나간 칸(유예시간 초과)이나 마지막으로 올린 큐 편보다 앞선 칸은 건너뜀 → 밀린 편이 과거 칸에 갇히지 않게
+        floor = now_kst().replace(tzinfo=None) - timedelta(hours=float(env.get("GRACE_HOURS", "3")))
+        for p in posts.values():
+            if p.get("num") and done(p):
+                k_ = log_key("reel", p["name"]) if p.get("kind") == "reel" else p["name"]
+                try:
+                    at_ = datetime.fromisoformat(log[k_].get("at", "")).replace(tzinfo=None)
+                    floor = max(floor, at_ + timedelta(seconds=1))
+                except ValueError:
+                    pass
         k = 0
+        def next_slot():
+            nonlocal k
+            while True:
+                k += 1
+                d, tm = slots(k)
+                if datetime.fromisoformat(f"{d}T{tm}") >= floor:
+                    return d, tm
         for p in sorted((p for p in posts.values() if p.get("num")), key=lambda p: (p["num"], p["name"])):
             if done(p):
                 continue
             if paused and p.get("kind") == "reel":
                 p["date"], p["time"] = "", ""
                 continue
-            k += 1
-            p["date"], p["time"] = slots(k)
+            p["date"], p["time"] = next_slot()
     return posts
 
 
